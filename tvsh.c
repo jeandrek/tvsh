@@ -58,6 +58,11 @@ command(const char *cmd)
 	int i, j, result;
 
 	for (i = 0; *cmd != '\0'; i++) {
+		if (i == MAX_ARG_COUNT) {
+			fprintf(stderr, "%s: Too many arguments\n", progname);
+			return EXIT_FAILURE;
+		}
+
 		while (isspace(*cmd))
 			cmd++;
 
@@ -66,8 +71,14 @@ command(const char *cmd)
 
 		argv[i] = malloc(MAX_ARG_SIZE);
 
-		for (j = 0; *cmd != '\0' && !isspace(*cmd); j++)
+		for (j = 0; *cmd != '\0' && !isspace(*cmd); j++) {
+			if (j == MAX_ARG_SIZE) {
+				fprintf(stderr, "%s: Argument too big\n", progname);
+				return EXIT_FAILURE;
+			}
+
 			argv[i][j] = *cmd++;
+		}
 
 		argv[i][j] = '\0';
 	}
@@ -75,7 +86,7 @@ command(const char *cmd)
 	argv[i] = NULL;
 
 	if (argv[0] == NULL)
-		return 0;
+		return EXIT_SUCCESS;
 
 	if (fork() == 0) {
 		execvp(argv[0], argv);
