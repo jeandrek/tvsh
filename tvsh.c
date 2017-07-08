@@ -14,18 +14,19 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/wait.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
-#include <ctype.h>
+#include <sys/wait.h>
 
-#define MAX_CMD_SIZE	4096
+#define MAX_CMD_SIZE	2048
 #define MAX_ARG_COUNT	64
-#define MAX_ARG_SIZE	64
 
+int	 command(char *cmd);
+int	 read_command(char *argv[], char *cmd);
+int	 exec_command(char *argv[]);
 char	*progname;
-int	 command(const char *cmd);
 
 int
 main(int argc, char *argv[])
@@ -52,40 +53,53 @@ main(int argc, char *argv[])
 }
 
 int
-command(const char *cmd)
+command(char *cmd)
 {
 	char *argv[MAX_ARG_COUNT];
-	int i, j, result;
+	int result;
 
-	for (i = 0; *cmd != '\0'; i++) {
-		if (i == MAX_ARG_COUNT) {
+	result = read_command(argv, cmd);
+
+	if (result != EXIT_SUCCESS)
+		return result;
+
+	result = exec_command(argv);
+
+	return result;
+}
+
+int
+read_command(char *argv[], char *cmd)
+{
+	const char	*delims	= " \t\v\f\n\r";
+	char		*token	= NULL;
+	int		 idx	= 0;
+
+	token = strtok(cmd, delims);
+
+	while (token != NULL) {
+		if (idx == MAX_ARG_COUNT) {
 			fprintf(stderr, "%s: Too many arguments\n", progname);
+
 			return EXIT_FAILURE;
 		}
 
-		while (isspace(*cmd))
-			cmd++;
-
-		if (*cmd == '\0')
-			break;
-
-		argv[i] = malloc(MAX_ARG_SIZE);
-
-		for (j = 0; *cmd != '\0' && !isspace(*cmd); j++) {
-			if (j == MAX_ARG_SIZE) {
-				fprintf(stderr, "%s: Argument too big\n", progname);
-				return EXIT_FAILURE;
-			}
-
-			argv[i][j] = *cmd++;
-		}
-
-		argv[i][j] = '\0';
+		argv[idx++]	= token;
+		token		= strtok(NULL, delims);
 	}
 
-	argv[i] = NULL;
+	argv[idx] = NULL;
+
+	return EXIT_SUCCESS;
+}
+
+int
+exec_command(char *argv[])
+{
+	int result;
 
 	if (argv[0] == NULL)
+		/* Empty command. */
 		return EXIT_SUCCESS;
 
 	if (fork() == 0) {
@@ -95,9 +109,6 @@ command(const char *cmd)
 	}
 
 	wait(&result);
-
-	for (i = 0; argv[i] != NULL; i++)
-		free(argv[i]);
 
 	return result;
 }
