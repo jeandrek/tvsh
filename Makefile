@@ -8,8 +8,8 @@ install: tvsh
 	install tvsh.1	/usr/share/man/man1
 
 uninstall:
-	rm -f /usr/local/bin/tvsh
-	rm -f /usr/share/man/man1/tvsh.1
+	rm /usr/local/bin/tvsh
+	rm /usr/share/man/man1/tvsh.1
 
 clean:
 	rm -f tvsh

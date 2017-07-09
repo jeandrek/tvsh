@@ -20,7 +20,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
-#define MAX_CMD_SIZE	2048
+#define MAX_CMD_SIZE	768
 #define MAX_ARG_COUNT	64
 #define NUM_BUILTINS	2
 
