@@ -22,11 +22,24 @@
 
 #define MAX_CMD_SIZE	2048
 #define MAX_ARG_COUNT	64
+#define NUM_BUILTINS	2
 
-int	 command(char *cmd);
-int	 read_command(char *argv[], char *cmd);
-int	 exec_command(char *argv[]);
-char	*progname;
+struct builtin {
+	char	  name[64];
+	int	(*exec)(char *argv[]);
+};
+
+int		 command(char *cmd);
+int		 read_command(char *argv[], char *cmd);
+int		 exec_command(char *argv[]);
+int		 builtin_cd(char *argv[]);
+int		 builtin_exit(char *argv[]);
+
+char		*progname;
+struct builtin	 builtins[NUM_BUILTINS] = {
+	{ .name = "cd",	.exec = builtin_cd },
+	{ .name = "exit",	.exec = builtin_exit },
+};
 
 int
 main(int argc, char *argv[])
@@ -102,6 +115,12 @@ exec_command(char *argv[])
 		/* Empty command. */
 		return EXIT_SUCCESS;
 
+	for (int idx = 0; idx < NUM_BUILTINS; idx++) {
+		if (!strcmp(builtins[idx].name, argv[0])) {
+			return builtins[idx].exec(argv);
+		}
+	}
+
 	if (fork() == 0) {
 		execvp(argv[0], argv);
 		perror(progname);
@@ -111,4 +130,38 @@ exec_command(char *argv[])
 	wait(&result);
 
 	return result;
+}
+
+/*
+ * Builtin commands follow.
+ */
+
+int
+builtin_cd(char *argv[])
+{
+	if (argv[1] == NULL || argv[2] != NULL) {
+		fprintf(stderr, "usage: cd directory\n");
+		return EXIT_FAILURE;
+	}
+
+	if (chdir(argv[1]) == -1) {
+		perror("cd");
+		return EXIT_FAILURE;
+	}
+
+	return EXIT_SUCCESS;
+}
+
+int
+builtin_exit(char *argv[])
+{
+	if (argv[1] != NULL && argv[2] != NULL) {
+		fprintf(stderr, "usage: exit [code]\n");
+		return EXIT_FAILURE;
+	}
+
+	if (argv[1] == NULL)
+		exit(EXIT_SUCCESS);
+	else
+		exit(atoi(argv[1]));
 }
