@@ -70,8 +70,8 @@ main(int argc, char *argv[])
 int
 command(char *cmd)
 {
-	char *argv[MAX_ARG_COUNT];
-	int result;
+	char	*argv[MAX_ARG_COUNT];
+	int	 result;
 
 	result = read_command(argv, cmd);
 
