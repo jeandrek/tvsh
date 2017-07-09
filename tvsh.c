@@ -29,12 +29,14 @@ struct builtin {
 	int	(*exec)(char *argv[]);
 };
 
+/* Procedure forward declarations. */
 int		 command(char *cmd);
 int		 read_command(char *argv[], char *cmd);
 int		 exec_command(char *argv[]);
 int		 builtin_cd(char *argv[]);
 int		 builtin_exit(char *argv[]);
 
+/* Global variable declarations. */
 char		*progname;
 struct builtin	 builtins[NUM_BUILTINS] = {
 	{ .name = "cd",		.exec = builtin_cd },
