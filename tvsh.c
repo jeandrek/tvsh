@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
 #include <sys/wait.h>
 
 #define MAX_CMD_SIZE	768
@@ -54,6 +55,8 @@ main(int argc, char *argv[])
 		fprintf(stderr, "usage: %s\n", progname);
 		exit(EXIT_FAILURE);
 	}
+
+	signal(SIGINT, SIG_IGN);
 
 	while (1) {
 		fputs("$ ", stdout);
@@ -124,6 +127,7 @@ exec_command(char *argv[])
 	}
 
 	if (fork() == 0) {
+		signal(SIGINT, SIG_DFL);
 		execvp(argv[0], argv);
 		perror(progname);
 		exit(EXIT_FAILURE);
