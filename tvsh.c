@@ -37,7 +37,7 @@ int		 builtin_exit(char *argv[]);
 
 char		*progname;
 struct builtin	 builtins[NUM_BUILTINS] = {
-	{ .name = "cd",	.exec = builtin_cd },
+	{ .name = "cd",		.exec = builtin_cd },
 	{ .name = "exit",	.exec = builtin_exit },
 };
 
