@@ -23,25 +23,34 @@
 
 #define MAX_CMD_SIZE	768
 #define MAX_ARG_COUNT	64
-#define NUM_BUILTINS	2
+#define NUM_BUILTINS	3
 
 struct builtin {
 	char	  name[64];
 	int	(*exec)(char *argv[]);
 };
 
-/* Procedure forward declarations. */
-int		 command(char *cmd);
-int		 read_command(char *argv[], char *cmd);
-int		 exec_command(char *argv[]);
-int		 builtin_cd(char *argv[]);
-int		 builtin_exit(char *argv[]);
+/*
+ * Procedure forward declarations.
+ */
 
-/* Global variable declarations. */
+int	command(char *cmd);
+int	read_command(char *argv[], char *cmd);
+int	exec_command(char *argv[]);
+int	builtin_exit(char *argv[]);
+int	builtin_exec(char *argv[]);
+int	builtin_cd(char *argv[]);
+
+/*
+ * Global variable declarations.
+ */
+
 char		*progname;
-struct builtin	 builtins[NUM_BUILTINS] = {
-	{ .name = "cd",		.exec = builtin_cd },
-	{ .name = "exit",	.exec = builtin_exit },
+struct builtin	 builtins[NUM_BUILTINS] =
+{
+	{ "exit",	builtin_exit },
+	{ "exec",	builtin_exec },
+	{ "cd",		builtin_cd },
 };
 
 int
@@ -143,6 +152,35 @@ exec_command(char *argv[])
  */
 
 int
+builtin_exit(char *argv[])
+{
+	if (argv[1] != NULL && argv[2] != NULL) {
+		fprintf(stderr, "usage: exit [code]\n");
+		return EXIT_FAILURE;
+	}
+
+	if (argv[1] == NULL)
+		exit(EXIT_SUCCESS);
+	else
+		exit(atoi(argv[1]));
+}
+
+int
+builtin_exec(char *argv[])
+{
+	if (argv[1] == NULL) {
+		fprintf(stderr, "usage: exec command ...\n");
+		return EXIT_FAILURE;
+	}
+
+	signal(SIGINT, SIG_DFL);
+	execvp(argv[1], argv+1);
+	perror(progname);
+
+	return EXIT_FAILURE;
+}
+
+int
 builtin_cd(char *argv[])
 {
 	if (argv[1] == NULL || argv[2] != NULL) {
@@ -156,18 +194,4 @@ builtin_cd(char *argv[])
 	}
 
 	return EXIT_SUCCESS;
-}
-
-int
-builtin_exit(char *argv[])
-{
-	if (argv[1] != NULL && argv[2] != NULL) {
-		fprintf(stderr, "usage: exit [code]\n");
-		return EXIT_FAILURE;
-	}
-
-	if (argv[1] == NULL)
-		exit(EXIT_SUCCESS);
-	else
-		exit(atoi(argv[1]));
 }
