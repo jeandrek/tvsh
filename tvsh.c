@@ -73,8 +73,8 @@ main(int argc, char *argv[])
 int
 command(char *cmd)
 {
-	char	*argv[MAX_ARG_COUNT];
-	int	 result;
+	int result;
+	char *argv[MAX_ARG_COUNT];
 
 	result = read_command(argv, cmd);
 
@@ -89,9 +89,9 @@ command(char *cmd)
 int
 read_command(char *argv[], char *cmd)
 {
-	const char	*delims	= " \t\v\f\n\r";
-	char		*token	= NULL;
-	int		 idx	= 0;
+	int idx	= 0;
+	char *token = NULL;
+	const char *delims = " \t\v\f\n\r";
 
 	token = strtok(cmd, delims);
 
