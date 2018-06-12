@@ -55,7 +55,7 @@ main(int argc, char *argv[])
 
 	if (argc != 1) {
 		fprintf(stderr, "usage: %s\n", progname);
-		exit(EXIT_FAILURE);
+		return EXIT_FAILURE;
 	}
 
 	signal(SIGINT, SIG_IGN);
@@ -64,7 +64,7 @@ main(int argc, char *argv[])
 		fputs(PROMPT, stdout);
 		if (fgets(cmd, MAX_CMD_SIZE, stdin) == NULL) {
 			putchar('\n');
-			exit(EXIT_SUCCESS);
+			return EXIT_SUCCESS;
 		}
 		command(cmd);
 	}
@@ -168,15 +168,21 @@ builtin_exec(char *argv[])
 int
 builtin_cd(char *argv[])
 {
-	if (argv[1] == NULL || argv[2] != NULL) {
-		fprintf(stderr, "usage: cd directory\n");
+	const char *path;
+
+	if (argv[1] != NULL && argv[2] != NULL) {
+		fprintf(stderr, "usage: cd [directory]\n");
 		return EXIT_FAILURE;
 	}
 
-	if (chdir(argv[1]) == -1) {
+	if (argv[1] == NULL)
+		path = getenv("HOME");
+	else
+		path = argv[1];
+
+	if (chdir(path) == -1) {
 		perror("cd");
 		return EXIT_FAILURE;
 	}
-
 	return EXIT_SUCCESS;
 }
