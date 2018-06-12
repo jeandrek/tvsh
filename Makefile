@@ -1,4 +1,4 @@
-CFLAGS=-Wall -Wextra -std=c99 -pedantic -O3
+CFLAGS=-Wall -Wextra -pedantic -O3
 
 all: tvsh
 

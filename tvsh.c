@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 Jeandre Kruger
+ * Copyright (c) 2017-2018 Jeandre Kruger
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -23,16 +23,12 @@
 
 #define MAX_CMD_SIZE	768
 #define MAX_ARG_COUNT	64
-#define NUM_BUILTINS	3
+#define PROMPT		"$ "
 
 struct builtin {
 	char	  name[64];
 	int	(*exec)(char *argv[]);
 };
-
-/*
- * Procedure forward declarations.
- */
 
 int	command(char *cmd);
 int	read_command(char *argv[], char *cmd);
@@ -41,17 +37,14 @@ int	builtin_exit(char *argv[]);
 int	builtin_exec(char *argv[]);
 int	builtin_cd(char *argv[]);
 
-/*
- * Global variable declarations.
- */
-
 char		*progname;
-struct builtin	 builtins[NUM_BUILTINS] =
-{
-	{ "exit",	builtin_exit },
-	{ "exec",	builtin_exec },
-	{ "cd",		builtin_cd },
+struct builtin	 builtins[] = {
+	{"exit", builtin_exit},
+	{"exec", builtin_exec},
+	{"cd", builtin_cd},
 };
+
+#define NUM_BUILTINS	(sizeof (builtins)/sizeof (struct builtin))
 
 int
 main(int argc, char *argv[])
@@ -68,13 +61,11 @@ main(int argc, char *argv[])
 	signal(SIGINT, SIG_IGN);
 
 	while (1) {
-		fputs("$ ", stdout);
-
+		fputs(PROMPT, stdout);
 		if (fgets(cmd, MAX_CMD_SIZE, stdin) == NULL) {
 			putchar('\n');
 			exit(EXIT_SUCCESS);
 		}
-
 		command(cmd);
 	}
 }
@@ -86,37 +77,33 @@ command(char *cmd)
 	char *argv[MAX_ARG_COUNT];
 
 	result = read_command(argv, cmd);
-
 	if (result != EXIT_SUCCESS)
 		return result;
 
 	result = exec_command(argv);
-
 	return result;
 }
 
 int
 read_command(char *argv[], char *cmd)
 {
-	int idx	= 0;
+	int i = 0;
 	char *token = NULL;
 	const char *delims = " \t\v\f\n\r";
 
 	token = strtok(cmd, delims);
 
 	while (token != NULL) {
-		if (idx == MAX_ARG_COUNT) {
+		if (i == MAX_ARG_COUNT) {
 			fprintf(stderr, "%s: Too many arguments\n", progname);
 
 			return EXIT_FAILURE;
 		}
-
-		argv[idx++]	= token;
+		argv[i++]	= token;
 		token		= strtok(NULL, delims);
 	}
 
-	argv[idx] = NULL;
-
+	argv[i] = NULL;
 	return EXIT_SUCCESS;
 }
 
@@ -129,9 +116,9 @@ exec_command(char *argv[])
 		/* Empty command. */
 		return EXIT_SUCCESS;
 
-	for (int idx = 0; idx < NUM_BUILTINS; idx++) {
-		if (!strcmp(builtins[idx].name, argv[0])) {
-			return builtins[idx].exec(argv);
+	for (size_t i = 0; i < NUM_BUILTINS; i++) {
+		if (!strcmp(builtins[i].name, argv[0])) {
+			return builtins[i].exec(argv);
 		}
 	}
 
@@ -143,7 +130,6 @@ exec_command(char *argv[])
 	}
 
 	wait(&result);
-
 	return result;
 }
 
@@ -176,7 +162,6 @@ builtin_exec(char *argv[])
 	signal(SIGINT, SIG_DFL);
 	execvp(argv[1], argv+1);
 	perror(progname);
-
 	return EXIT_FAILURE;
 }
 
