@@ -204,8 +204,10 @@ redirect(char *argv[], int oldds[])
 			if ((*argv)[1] == '>') {
 				flags |= O_APPEND;
 				path = *argv + 2;
-			} else
+			} else {
+				flags |= O_TRUNC;
 				path = *argv + 1;
+			}
 			break;
 		case '2':
 			if ((*argv)[1] != '>')
@@ -215,8 +217,10 @@ redirect(char *argv[], int oldds[])
 			if ((*argv)[2] == '>') {
 				flags |= O_APPEND;
 				path = *argv + 3;
-			} else
+			} else {
+				flags |= O_TRUNC;
 				path = *argv + 2;
+			}
 		}
 		if (fd != -1) {
 			for (size_t i = 0; argv[i] != NULL; i++)
