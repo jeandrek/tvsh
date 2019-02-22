@@ -72,7 +72,7 @@ main(int argc, char *argv[])
 			return EXIT_FAILURE;
 		}
 	} else
-		interactive = isatty(STDIN_FILENO);
+		interactive = isatty(STDIN_FILENO) && isatty(STDERR_FILENO);
 
 	if (interactive)
 		signal(SIGINT, SIG_IGN);
