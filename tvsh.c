@@ -15,6 +15,7 @@
  */
 
 #include <sys/wait.h>
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -34,6 +35,7 @@ struct builtin {
 
 int		 command(char *cmd);
 int		 read_command(char *argv[], char *cmd);
+void		 free_command(char *argv[]);
 int		 exec_command(char *argv[]);
 int		 redirect(char *argv[], int oldds[]);
 void		 restore(int oldds[]);
@@ -92,32 +94,57 @@ command(char *cmd)
 	char *argv[MAX_ARG_COUNT];
 	int result;
 
-	result = read_command(argv, cmd);
-	if (result != EXIT_SUCCESS)
+	if ((result = read_command(argv, cmd)) != EXIT_SUCCESS)
 		return result;
 	result = exec_command(argv);
+	free_command(argv);
 	return result;
 }
-
-#define DELIMETERS	"\t\n\f\r "
 
 int
 read_command(char *argv[], char *cmd)
 {
-	char *token = NULL;
-	int i = 0;
+	size_t length, size;
+	int c, i = 0;
+	char *token;
 
-	token = strtok(cmd, DELIMETERS);
-	while (token != NULL) {
+	while (*cmd != 0) {
 		if (i == MAX_ARG_COUNT) {
 			fprintf(stderr, "%s: Too many arguments\n", progname);
 			return EXIT_FAILURE;
 		}
+		token = NULL;
+		length = 0;
+		size = 0;
+		while (isspace(*cmd))
+			cmd++;
+		while ((c = *cmd++) != 0 && !isspace(c)) {
+			if (length == size)
+				token = realloc(token, size += 8);
+			token[length++] = c;
+			if (*cmd == '<')
+				break;
+			if (c != '2' && c != '>' && *cmd == '>')
+				break;
+			while ((c == '<' || c == '>') && isspace(*cmd))
+				cmd++;
+		}
+		if (length == size)
+			token = realloc(token, size + 1);
+		token[length] = 0;
 		argv[i++] = token;
-		token = strtok(NULL, DELIMETERS);
+		while (isspace(*cmd))
+			cmd++;
 	}
 	argv[i] = NULL;
 	return EXIT_SUCCESS;
+}
+
+void
+free_command(char *argv[])
+{
+	while (*argv != NULL)
+		free(*argv++);
 }
 
 int
@@ -192,7 +219,7 @@ redirect(char *argv[], int oldds[])
 				path = *argv + 2;
 		}
 		if (fd != -1) {
-			for (size_t i = 0; argv[i] != NULL; i++)
+			for (int i = 0; argv[i] != NULL; i++)
 				argv[i] = argv[i + 1];
 			oldds[fd] = dup(fd);
 			close(fd);
