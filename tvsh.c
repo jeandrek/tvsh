@@ -104,9 +104,9 @@ command(char *cmd)
 int
 read_command(char *argv[], char *cmd)
 {
-	size_t length, size;
-	int c, i = 0;
+	size_t i = 0, length, size;
 	char *token;
+	int c;
 
 	while (*cmd != 0) {
 		if (i == MAX_ARG_COUNT) {
@@ -219,7 +219,7 @@ redirect(char *argv[], int oldds[])
 				path = *argv + 2;
 		}
 		if (fd != -1) {
-			for (int i = 0; argv[i] != NULL; i++)
+			for (size_t i = 0; argv[i] != NULL; i++)
 				argv[i] = argv[i + 1];
 			oldds[fd] = dup(fd);
 			close(fd);
