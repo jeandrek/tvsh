@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018 Jeandre Kruger
+ * Copyright (c) 2017-2019 Jeandre Kruger
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -14,34 +14,38 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <sys/wait.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <signal.h>
-#include <sys/wait.h>
 
 #define MAX_CMD_SIZE	768
 #define MAX_ARG_COUNT	64
 #define PROMPT		"$ "
 
 struct builtin {
-	char	  name[64];
+	char	name[64];
 	int	(*exec)(char *argv[]);
 };
 
-int	command(char *cmd);
-int	read_command(char *argv[], char *cmd);
-int	exec_command(char *argv[]);
-int	builtin_exit(char *argv[]);
-int	builtin_exec(char *argv[]);
-int	builtin_cd(char *argv[]);
+int		 command(char *cmd);
+int		 read_command(char *argv[], char *cmd);
+int		 exec_command(char *argv[]);
+int		 redirect(char *argv[], int oldds[]);
+void		 restore(int oldds[]);
+int		 builtin_exit(char *argv[]);
+int		 builtin_exec(char *argv[]);
+int		 builtin_cd(char *argv[]);
 
-char		*progname;
+const char	*progname;
 struct builtin	 builtins[] = {
 	{"exit", builtin_exit},
 	{"exec", builtin_exec},
-	{"cd", builtin_cd},
+	{"cd", builtin_cd}
 };
 
 #define NUM_BUILTINS	(sizeof (builtins)/sizeof (struct builtin))
@@ -51,15 +55,15 @@ main(int argc, char *argv[])
 {
 	char cmd[MAX_CMD_SIZE];
 
-	progname = argv[0];
-
+	if ((progname = strrchr(argv[0], '/')) != NULL)
+		progname += 1;
+	else
+		progname = argv[0];
 	if (argc != 1) {
 		fprintf(stderr, "usage: %s\n", progname);
 		return EXIT_FAILURE;
 	}
-
 	signal(SIGINT, SIG_IGN);
-
 	while (1) {
 		fputs(PROMPT, stdout);
 		if (fgets(cmd, MAX_CMD_SIZE, stdin) == NULL) {
@@ -73,36 +77,33 @@ main(int argc, char *argv[])
 int
 command(char *cmd)
 {
-	int result;
 	char *argv[MAX_ARG_COUNT];
+	int result;
 
 	result = read_command(argv, cmd);
 	if (result != EXIT_SUCCESS)
 		return result;
-
 	result = exec_command(argv);
 	return result;
 }
 
+#define DELIMETERS	"\t\n\f\r "
+
 int
 read_command(char *argv[], char *cmd)
 {
-	int i = 0;
 	char *token = NULL;
-	const char *delims = " \t\v\f\n\r";
+	int i = 0;
 
-	token = strtok(cmd, delims);
-
+	token = strtok(cmd, DELIMETERS);
 	while (token != NULL) {
 		if (i == MAX_ARG_COUNT) {
 			fprintf(stderr, "%s: Too many arguments\n", progname);
-
 			return EXIT_FAILURE;
 		}
-		argv[i++]	= token;
-		token		= strtok(NULL, delims);
+		argv[i++] = token;
+		token = strtok(NULL, DELIMETERS);
 	}
-
 	argv[i] = NULL;
 	return EXIT_SUCCESS;
 }
@@ -110,27 +111,98 @@ read_command(char *argv[], char *cmd)
 int
 exec_command(char *argv[])
 {
+	int oldds[3];
 	int result;
 
 	if (argv[0] == NULL)
 		/* Empty command. */
 		return EXIT_SUCCESS;
 
-	for (size_t i = 0; i < NUM_BUILTINS; i++) {
+	result = redirect(argv, oldds);
+	if (result != EXIT_SUCCESS)
+		return result;
+
+	for (size_t i = 0; i < NUM_BUILTINS; i++)
 		if (!strcmp(builtins[i].name, argv[0])) {
-			return builtins[i].exec(argv);
+			result = builtins[i].exec(argv);
+			restore(oldds);
+			return result;
 		}
-	}
 
 	if (fork() == 0) {
 		signal(SIGINT, SIG_DFL);
 		execvp(argv[0], argv);
-		perror(progname);
+		fprintf(stderr, "%s: %s: %s\n", progname, argv[0],
+			strerror(errno));
 		exit(EXIT_FAILURE);
 	}
-
 	wait(&result);
+	restore(oldds);
 	return result;
+}
+
+int
+redirect(char *argv[], int oldds[])
+{
+	int fd, flags;
+	char *path;
+
+	oldds[STDIN_FILENO] = -1;
+	oldds[STDOUT_FILENO] = -1;
+	oldds[STDERR_FILENO] = -1;
+	while (*argv != NULL) {
+		fd = -1;
+		switch ((*argv)[0]) {
+		case '<':
+			fd = STDIN_FILENO;
+			flags = O_RDONLY;
+			path = *argv + 1;
+			break;
+		case '>':
+			fd = STDOUT_FILENO;
+			flags = O_WRONLY | O_CREAT;
+			if ((*argv)[1] == '>') {
+				flags |= O_APPEND;
+				path = *argv + 2;
+			} else
+				path = *argv + 1;
+			break;
+		case '2':
+			if ((*argv)[1] != '>')
+				break;
+			fd = STDERR_FILENO;
+			flags = O_WRONLY | O_CREAT;
+			if ((*argv)[2] == '>') {
+				flags |= O_APPEND;
+				path = *argv + 3;
+			} else
+				path = *argv + 2;
+		}
+		if (fd != -1) {
+			for (size_t i = 0; argv[i] != NULL; i++)
+				argv[i] = argv[i + 1];
+			oldds[fd] = dup(fd);
+			close(fd);
+			if (open(path, flags, 0666) == -1) {
+				restore(oldds);
+				fprintf(stderr, "%s: %s: %s\n", progname, path,
+					strerror(errno));
+				return EXIT_FAILURE;
+			}
+		} else
+			argv++;
+	}
+	return EXIT_SUCCESS;
+}
+
+void
+restore(int oldds[])
+{
+	for (int fd = 0; fd < 3; fd++)
+		if (oldds[fd] != -1) {
+			dup2(oldds[fd], fd);
+			close(oldds[fd]);
+		}
 }
 
 /*
@@ -144,7 +216,6 @@ builtin_exit(char *argv[])
 		fprintf(stderr, "usage: exit [code]\n");
 		return EXIT_FAILURE;
 	}
-
 	if (argv[1] == NULL)
 		exit(EXIT_SUCCESS);
 	else
@@ -158,10 +229,9 @@ builtin_exec(char *argv[])
 		fprintf(stderr, "usage: exec command ...\n");
 		return EXIT_FAILURE;
 	}
-
 	signal(SIGINT, SIG_DFL);
-	execvp(argv[1], argv+1);
-	perror(progname);
+	execvp(argv[1], argv + 1);
+	fprintf(stderr, "exec: %s: %s\n", argv[1], strerror(errno));
 	return EXIT_FAILURE;
 }
 
@@ -181,7 +251,7 @@ builtin_cd(char *argv[])
 		path = argv[1];
 
 	if (chdir(path) == -1) {
-		perror("cd");
+		fprintf(stderr, "cd: %s: %s\n", path, strerror(errno));
 		return EXIT_FAILURE;
 	}
 	return EXIT_SUCCESS;
