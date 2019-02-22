@@ -41,6 +41,7 @@ int		 builtin_exit(char *argv[]);
 int		 builtin_exec(char *argv[]);
 int		 builtin_cd(char *argv[]);
 
+int		 interactive;
 const char	*progname;
 struct builtin	 builtins[] = {
 	{"exit", builtin_exit},
@@ -54,20 +55,31 @@ int
 main(int argc, char *argv[])
 {
 	char cmd[MAX_CMD_SIZE];
+	FILE *f = stdin;
 
 	if ((progname = strrchr(argv[0], '/')) != NULL)
 		progname += 1;
 	else
 		progname = argv[0];
-	if (argc != 1) {
-		fprintf(stderr, "usage: %s\n", progname);
-		return EXIT_FAILURE;
-	}
-	signal(SIGINT, SIG_IGN);
+
+	if (argc > 1) {
+		f = fopen(argv[1], "r");
+		if (f == NULL) {
+			fprintf(stderr, "%s: %s: %s\n", progname, argv[1],
+				strerror(errno));
+			return EXIT_FAILURE;
+		}
+	} else
+		interactive = isatty(STDIN_FILENO);
+
+	if (interactive)
+		signal(SIGINT, SIG_IGN);
 	while (1) {
-		fputs(PROMPT, stdout);
-		if (fgets(cmd, MAX_CMD_SIZE, stdin) == NULL) {
-			putchar('\n');
+		if (interactive)
+			fputs(PROMPT, stdout);
+		if (fgets(cmd, MAX_CMD_SIZE, f) == NULL) {
+			if (interactive)
+				putchar('\n');
 			return EXIT_SUCCESS;
 		}
 		command(cmd);
@@ -130,7 +142,8 @@ exec_command(char *argv[])
 		}
 
 	if (fork() == 0) {
-		signal(SIGINT, SIG_DFL);
+		if (interactive)
+			signal(SIGINT, SIG_DFL);
 		execvp(argv[0], argv);
 		fprintf(stderr, "%s: %s: %s\n", progname, argv[0],
 			strerror(errno));
@@ -229,7 +242,8 @@ builtin_exec(char *argv[])
 		fprintf(stderr, "usage: exec command ...\n");
 		return EXIT_FAILURE;
 	}
-	signal(SIGINT, SIG_DFL);
+	if (interactive)
+		signal(SIGINT, SIG_DFL);
 	execvp(argv[1], argv + 1);
 	fprintf(stderr, "exec: %s: %s\n", argv[1], strerror(errno));
 	return EXIT_FAILURE;
