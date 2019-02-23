@@ -225,7 +225,7 @@ redirect(char *argv[], int oldds[])
 		if (fd != -1) {
 			for (size_t i = 0; argv[i] != NULL; i++)
 				argv[i] = argv[i + 1];
-			oldds[fd] = dup(fd);
+			oldds[fd] = fcntl(fd, F_DUPFD_CLOEXEC, 0);
 			close(fd);
 			if (open(path, flags, 0666) == -1) {
 				restore(oldds);
