@@ -33,8 +33,7 @@ struct builtin {
 	int	(*exec)(char *argv[]);
 };
 
-int		 command(char *cmd);
-int		 read_command(char *argv[], char *cmd);
+int		 read_command(char *argv[], FILE *f);
 void		 free_command(char *argv[]);
 int		 exec_command(char *argv[]);
 int		 redirect(char *argv[], int oldds[]);
@@ -56,8 +55,9 @@ struct builtin	 builtins[] = {
 int
 main(int argc, char *argv[])
 {
-	char cmd[MAX_CMD_SIZE];
+	char *command[MAX_ARG_COUNT];
 	FILE *f = stdin;
+	int result;
 
 	if ((progname = strrchr(argv[0], '/')) != NULL)
 		progname += 1;
@@ -79,36 +79,26 @@ main(int argc, char *argv[])
 	while (1) {
 		if (interactive)
 			fputs(PROMPT, stdout);
-		if (fgets(cmd, MAX_CMD_SIZE, f) == NULL) {
+		if (read_command(command, f) == EOF) {
 			if (interactive)
 				putchar('\n');
 			return EXIT_SUCCESS;
 		}
-		command(cmd);
+		result = exec_command(command);
+		free_command(command);
 	}
 }
 
 int
-command(char *cmd)
-{
-	char *argv[MAX_ARG_COUNT];
-	int result;
-
-	if ((result = read_command(argv, cmd)) != EXIT_SUCCESS)
-		return result;
-	result = exec_command(argv);
-	free_command(argv);
-	return result;
-}
-
-int
-read_command(char *argv[], char *cmd)
+read_command(char *argv[], FILE *f)
 {
 	size_t i = 0, length, size;
 	char *token;
-	int c;
+	int c, c1;
 
-	while (*cmd != 0) {
+	if ((c = getc(f)) == EOF)
+		return EOF;
+	while (c != '\n') {
 		if (i == MAX_ARG_COUNT) {
 			fprintf(stderr, "%s: Too many arguments\n", progname);
 			return EXIT_FAILURE;
@@ -116,28 +106,31 @@ read_command(char *argv[], char *cmd)
 		token = NULL;
 		length = 0;
 		size = 0;
-		while (isspace(*cmd))
-			cmd++;
-		while ((c = *cmd++) != 0 && !isspace(c)) {
+		while (isspace(c))
+			c = getc(f);
+		while (!isspace(c)) {
 			if (length == size)
 				token = realloc(token, size += 8);
 			token[length++] = c;
-			if (*cmd == '<')
+			if ((c1 = getc(f)) == '<')
 				break;
-			if (c != '2' && c != '>' && *cmd == '>')
+			if (c != '2' && c != '>' && c1 == '>')
 				break;
-			while ((c == '<' || c == '>') && isspace(*cmd))
-				cmd++;
+			if (c == '<' || c == '>')
+				while (isspace(c1) && c1 != '\n')
+					c1 = getc(f);
+			c = c1;
 		}
 		if (length == size)
 			token = realloc(token, size + 1);
 		token[length] = 0;
 		argv[i++] = token;
-		while (isspace(*cmd))
-			cmd++;
+		if (c != '\n')
+			while (isspace(c = getc(f)) && c != '\n')
+				;
 	}
 	argv[i] = NULL;
-	return EXIT_SUCCESS;
+	return 0;
 }
 
 void
