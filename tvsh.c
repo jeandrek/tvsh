@@ -111,6 +111,15 @@ read_command(char *argv[], FILE *f)
 		while (!isspace(c)) {
 			if (length == size)
 				token = realloc(token, size += 8);
+			if (c == '\\') {
+				if ((c1 = getc(f)) == '\n') {
+					c = getc(f);
+				} else {
+					token[length++] = c1;
+					c = getc(f);
+				}
+				continue;
+			}
 			token[length++] = c;
 			if ((c1 = getc(f)) == '<')
 				break;
