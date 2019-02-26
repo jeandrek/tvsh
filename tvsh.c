@@ -24,23 +24,22 @@
 #include <string.h>
 #include <unistd.h>
 
-#define MAX_CMD_SIZE	768
 #define MAX_ARG_COUNT	64
 #define PROMPT		"$ "
 
 struct builtin {
 	char	name[64];
-	int	(*exec)(char *argv[]);
+	int	(*exec)(char *[]);
 };
 
-int		 read_command(char *argv[], FILE *f);
-void		 free_command(char *argv[]);
-int		 exec_command(char *argv[]);
-int		 redirect(char *argv[], int oldds[]);
-void		 restore(int oldds[]);
-int		 builtin_exit(char *argv[]);
-int		 builtin_exec(char *argv[]);
-int		 builtin_cd(char *argv[]);
+int		 read_command(char *[], FILE *);
+void		 free_command(char *[]);
+int		 exec_command(char *[]);
+int		 redirect(char *[], int[]);
+void		 restore(int[]);
+int		 builtin_exit(char *[]);
+int		 builtin_exec(char *[]);
+int		 builtin_cd(char *[]);
 
 int		 interactive;
 const char	*progname;
@@ -92,12 +91,14 @@ main(int argc, char *argv[])
 int
 read_command(char *argv[], FILE *f)
 {
-	size_t i = 0, length, size;
+	size_t length, size;
+	int i = 0, c, c1;
 	char *token;
-	int c, c1;
 
 	if ((c = getc(f)) == EOF)
 		return EOF;
+	while (isspace(c) && c != '\n')
+		c = getc(f);
 	while (c != '\n') {
 		if (i == MAX_ARG_COUNT) {
 			fprintf(stderr, "%s: Too many arguments\n", progname);
@@ -106,9 +107,7 @@ read_command(char *argv[], FILE *f)
 		token = NULL;
 		length = 0;
 		size = 0;
-		while (isspace(c))
-			c = getc(f);
-		while (!isspace(c)) {
+		do {
 			if (length == size)
 				token = realloc(token, size += 8);
 			if (c == '\\') {
@@ -129,7 +128,7 @@ read_command(char *argv[], FILE *f)
 				while (isspace(c1) && c1 != '\n')
 					c1 = getc(f);
 			c = c1;
-		}
+		} while (!isspace(c));
 		if (length == size)
 			token = realloc(token, size + 1);
 		token[length] = 0;
@@ -225,7 +224,7 @@ redirect(char *argv[], int oldds[])
 			}
 		}
 		if (fd != -1) {
-			for (size_t i = 0; argv[i] != NULL; i++)
+			for (int i = 0; argv[i] != NULL; i++)
 				argv[i] = argv[i + 1];
 			oldds[fd] = fcntl(fd, F_DUPFD_CLOEXEC, 0);
 			close(fd);
