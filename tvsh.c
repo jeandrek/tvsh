@@ -40,6 +40,7 @@ struct redirect {
 struct command {
 	char		**argv;
 	struct redirect	*redirs;
+	int		detached;
 };
 
 struct command	*read_command(FILE *);
@@ -86,6 +87,7 @@ main(int argc, char *argv[])
 
 	if (interactive)
 		signal(SIGINT, SIG_IGN);
+	signal(SIGQUIT, SIG_IGN);
 	while (1) {
 		if (interactive)
 			fputs(PROMPT, stdout);
@@ -105,10 +107,12 @@ main(int argc, char *argv[])
 	}
 }
 
-/* Token types */
+/* Token types. */
 #define EOL		0
-#define TEXT		1
-#define REDIRECTION	2
+#define DETACHED	1
+#define SEPERATOR	2
+#define REDIRECTION	3
+#define TEXT		4
 
 struct command *
 read_command(FILE *f)
@@ -121,10 +125,15 @@ read_command(FILE *f)
 	command = malloc(sizeof *command);
 	command->argv = NULL;
 	command->redirs = NULL;
+	command->detached = 0;
 	while ((type = read_token(&text, &r, f)) != EOL)
 		switch (type) {
 		case EOF:
 			return NULL;
+		case DETACHED:
+			command->detached = 1;
+		case SEPERATOR:
+			goto done;
 		case TEXT:
 			if (i == k)
 				command->argv =
@@ -143,11 +152,13 @@ read_command(FILE *f)
 				free_command(command);
 				return NULL;
 			}
+			r->oldd = -1;
 			r->path = text;
 			r->next = command->redirs;
 			command->redirs = r;
 			break;
 		}
+done:
 	if (i == k)
 		command->argv = realloc(command->argv,
 					(k + 1)*sizeof (char *));
@@ -175,7 +186,11 @@ read_token(char **text, struct redirect **r, FILE *f)
 		} else
 			ungetc(c1, f);
 	}
-	if (c == '<' || c == '>') {
+	switch (c) {
+	case '&':	return DETACHED;
+	case ';':	return SEPERATOR;
+	case '<':
+	case '>':
 		*r = malloc(sizeof **r);
 		if (fd != -1)
 			(*r)->fd = fd;
@@ -207,7 +222,7 @@ read_token(char **text, struct redirect **r, FILE *f)
 			continue;
 		}
 		(*text)[length++] = c;
-		if ((c = getc(f)) == '<' || c == '>')
+		if ((c = getc(f)) == '&' || c == ';' || c == '<' || c == '>')
 			break;
 	} while (!isspace(c));
 	ungetc(c, f);
@@ -237,6 +252,7 @@ int
 exec_command(struct command *command)
 {
 	int result;
+	pid_t pid;
 
 	result = redirect(command->redirs);
 	if (result != EXIT_SUCCESS)
@@ -255,15 +271,26 @@ exec_command(struct command *command)
 			return result;
 		}
 
-	if (fork() == 0) {
-		if (interactive)
+	if ((pid = fork()) == 0) {
+		if (interactive && !command->detached) {
 			signal(SIGINT, SIG_DFL);
+			signal(SIGQUIT, SIG_DFL);
+		} else if (command->detached) {
+			signal(SIGINT, SIG_IGN);
+			signal(SIGQUIT, SIG_IGN);
+		} else
+			signal(SIGQUIT, SIG_DFL);
 		execvp(command->argv[0], command->argv);
 		fprintf(stderr, "%s: %s: %s\n", progname, command->argv[0],
 			strerror(errno));
 		exit(EXIT_FAILURE);
+	} else if (pid == -1) {
+		fprintf(stderr, "%s: %s\n", progname, strerror(errno));
+		return EXIT_FAILURE;
 	}
-	wait(&result);
+	if (!command->detached)
+		while (wait(&result) != pid)
+			;
 	restore(command->redirs);
 	return result;
 }
@@ -304,7 +331,7 @@ restore(struct redirect *r)
 }
 
 /*
- * Builtin commands follow.
+ * Builtin commands.
  */
 
 int
@@ -329,6 +356,7 @@ builtin_exec(char *argv[])
 	}
 	if (interactive)
 		signal(SIGINT, SIG_DFL);
+	signal(SIGQUIT, SIG_DFL);
 	execvp(argv[1], argv + 1);
 	fprintf(stderr, "exec: %s: %s\n", argv[1], strerror(errno));
 	return EXIT_FAILURE;
