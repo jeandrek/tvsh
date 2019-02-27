@@ -28,15 +28,27 @@
 #define PROMPT		"$ "
 
 struct builtin {
-	char	name[64];
-	int	(*exec)(char *[]);
+	char		name[64];
+	int		(*exec)(char *[]);
 };
 
-int		 read_command(char *[], FILE *);
-void		 free_command(char *[]);
-int		 exec_command(char *[]);
-int		 redirect(char *[], int[]);
-void		 restore(int[]);
+struct redirect {
+	int		fd, flags, oldd;
+	char		*path;
+	struct redirect	*next;
+};
+
+struct command {
+	char		*argv[MAX_ARG_COUNT + 1];
+	struct redirect	*redirections;
+};
+
+int		 read_command(struct command *, FILE *);
+int		 read_token(char **, struct redirect **, FILE *f);
+void		 free_command(struct command *);
+int		 exec_command(struct command *);
+int		 redirect(struct redirect *);
+void		 restore(struct redirect *);
 int		 builtin_exit(char *[]);
 int		 builtin_exec(char *[]);
 int		 builtin_cd(char *[]);
@@ -54,7 +66,7 @@ struct builtin	 builtins[] = {
 int
 main(int argc, char *argv[])
 {
-	char *command[MAX_ARG_COUNT];
+	struct command command;
 	FILE *f = stdin;
 	int result;
 
@@ -78,176 +90,208 @@ main(int argc, char *argv[])
 	while (1) {
 		if (interactive)
 			fputs(PROMPT, stdout);
-		if (read_command(command, f) == EOF) {
-			if (interactive)
-				putchar('\n');
-			return EXIT_SUCCESS;
+		if (read_command(&command, f) == EOF) {
+			if (feof(f)) {
+				if (interactive)
+					putchar('\n');
+				return EXIT_SUCCESS;
+			} else if (interactive) {
+				fpurge(f);
+				continue;
+			} else
+				return EXIT_FAILURE;
 		}
-		result = exec_command(command);
-		free_command(command);
+		result = exec_command(&command);
+		free_command(&command);
 	}
 }
 
-int
-read_command(char *argv[], FILE *f)
-{
-	size_t length, size;
-	int i = 0, c, c1;
-	char *token;
+#define EOL		0
+#define TEXT		1
+#define REDIRECTION	2
 
-	if ((c = getc(f)) == EOF)
-		return EOF;
-	while (isspace(c) && c != '\n')
-		c = getc(f);
-	while (c != '\n') {
-		if (i == MAX_ARG_COUNT) {
-			fprintf(stderr, "%s: Too many arguments\n", progname);
-			return EXIT_FAILURE;
-		}
-		token = NULL;
-		length = 0;
-		size = 0;
-		do {
-			if (length == size)
-				token = realloc(token, size += 8);
-			if (c == '\\') {
-				if ((c1 = getc(f)) == '\n') {
-					c = getc(f);
-				} else {
-					token[length++] = c1;
-					c = getc(f);
-				}
-				continue;
+int
+read_command(struct command *command, FILE *f)
+{
+	struct redirect *r;
+	int type, i = 0;
+	char *text;
+
+	command->redirections = NULL;
+	while ((type = read_token(&text, &r, f)) != EOL)
+		switch (type) {
+		case EOF:
+			return EOF;
+		case TEXT:
+			if (i == MAX_ARG_COUNT) {
+				fprintf(stderr, "%s: Too many arguments\n",
+					progname);
+				command->argv[i] = NULL;
+				return EOF;
 			}
-			token[length++] = c;
-			if ((c1 = getc(f)) == '<')
-				break;
-			if (c != '2' && c != '>' && c1 == '>')
-				break;
-			if (c == '<' || c == '>')
-				while (isspace(c1) && c1 != '\n')
-					c1 = getc(f);
-			c = c1;
-		} while (!isspace(c));
-		if (length == size)
-			token = realloc(token, size + 1);
-		token[length] = 0;
-		argv[i++] = token;
-		if (c != '\n')
-			while (isspace(c = getc(f)) && c != '\n')
-				;
-	}
-	argv[i] = NULL;
+			command->argv[i++] = text;
+			break;
+		case REDIRECTION:
+			if (read_token(&text, &r, f) != TEXT) {
+				fprintf(stderr, "%s: Redirection operator not "
+					"followed by file path\n", progname);
+				free(r);
+				command->argv[i] = NULL;
+				return EOF;
+			}
+			r->path = text;
+			r->next = command->redirections;
+			command->redirections = r;
+			break;
+		}
+	command->argv[i] = NULL;
 	return 0;
 }
 
-void
-free_command(char *argv[])
+int
+read_token(char **text, struct redirect **r, FILE *f)
 {
-	while (*argv != NULL)
-		free(*argv++);
+	size_t length = 0, size = 0;
+	int fd = -1, c, c1;
+
+	if ((c = getc(f)) == EOF)
+		return EOF;
+	while (isspace(c)) {
+		if (c == '\n')
+			return EOL;
+		c = getc(f);
+	}
+	if (isdigit(c)) {
+		if ((c1 = getc(f)) == '<' || c1 == '>') {
+			fd = c - '0';
+			c = c1;
+		} else
+			ungetc(c1, f);
+	}
+	if (c == '<' || c == '>') {
+		*r = malloc(sizeof **r);
+		if (fd != -1)
+			(*r)->fd = fd;
+		else if (c == '<')
+			(*r)->fd = STDIN_FILENO;
+		else
+			(*r)->fd = STDOUT_FILENO;
+		if (c == '<')
+			(*r)->flags = O_RDONLY;
+		else if ((c = getc(f)) == '>')
+			(*r)->flags = O_WRONLY | O_CREAT | O_APPEND;
+		else {
+			(*r)->flags = O_WRONLY | O_CREAT | O_TRUNC;
+			ungetc(c, f);
+		}
+		return REDIRECTION;
+	}
+	*text = NULL;
+	do {
+		if (length == size)
+			*text = realloc(*text, size += 8);
+		if (c == '\\') {
+			if ((c1 = getc(f)) == '\n')
+				c = getc(f);
+			else {
+				(*text)[length++] = c1;
+				c = getc(f);
+			}
+			continue;
+		}
+		(*text)[length++] = c;
+		if ((c = getc(f)) == '<' || c == '>')
+			break;
+	} while (!isspace(c));
+	ungetc(c, f);
+	if (length == size)
+		*text = realloc(*text, size + 1);
+	(*text)[length] = 0;
+	return TEXT;
+}
+
+void
+free_command(struct command *command)
+{
+	struct redirect *r, *r1;
+
+	for (int i = 0; command->argv[i] != NULL; i++)
+		free(command->argv[i]);
+	for (r = command->redirections; r != NULL; r = r1) {
+		r1 = r->next;
+		free(r->path);
+		free(r);
+	}
 }
 
 int
-exec_command(char *argv[])
+exec_command(struct command *command)
 {
-	int oldds[3];
 	int result;
 
-	if (argv[0] == NULL)
-		/* Empty command. */
-		return EXIT_SUCCESS;
-
-	result = redirect(argv, oldds);
+	result = redirect(command->redirections);
 	if (result != EXIT_SUCCESS)
 		return result;
 
+	if (command->argv[0] == NULL) {
+		/* Empty command. */
+		restore(command->redirections);
+		return EXIT_SUCCESS;
+	}
+
 	for (size_t i = 0; i < NUM_BUILTINS; i++)
-		if (!strcmp(builtins[i].name, argv[0])) {
-			result = builtins[i].exec(argv);
-			restore(oldds);
+		if (!strcmp(builtins[i].name, command->argv[0])) {
+			result = builtins[i].exec(command->argv);
+			restore(command->redirections);
 			return result;
 		}
 
 	if (fork() == 0) {
 		if (interactive)
 			signal(SIGINT, SIG_DFL);
-		execvp(argv[0], argv);
-		fprintf(stderr, "%s: %s: %s\n", progname, argv[0],
+		execvp(command->argv[0], command->argv);
+		fprintf(stderr, "%s: %s: %s\n", progname, command->argv[0],
 			strerror(errno));
 		exit(EXIT_FAILURE);
 	}
 	wait(&result);
-	restore(oldds);
+	restore(command->redirections);
 	return result;
 }
 
 int
-redirect(char *argv[], int oldds[])
+redirect(struct redirect *r)
 {
-	int fd, flags;
-	char *path;
+	int newd;
 
-	oldds[STDIN_FILENO] = -1;
-	oldds[STDOUT_FILENO] = -1;
-	oldds[STDERR_FILENO] = -1;
-	while (*argv != NULL) {
-		fd = -1;
-		switch ((*argv)[0]) {
-		case '<':
-			fd = STDIN_FILENO;
-			flags = O_RDONLY;
-			path = *argv + 1;
-			break;
-		case '>':
-			fd = STDOUT_FILENO;
-			flags = O_WRONLY | O_CREAT;
-			if ((*argv)[1] == '>') {
-				flags |= O_APPEND;
-				path = *argv + 2;
-			} else {
-				flags |= O_TRUNC;
-				path = *argv + 1;
-			}
-			break;
-		case '2':
-			if ((*argv)[1] != '>')
-				break;
-			fd = STDERR_FILENO;
-			flags = O_WRONLY | O_CREAT;
-			if ((*argv)[2] == '>') {
-				flags |= O_APPEND;
-				path = *argv + 3;
-			} else {
-				flags |= O_TRUNC;
-				path = *argv + 2;
-			}
+	for (struct redirect *r1 = r; r1 != NULL; r1 = r1->next) {
+		r1->oldd = fcntl(r1->fd, F_DUPFD_CLOEXEC, 0);
+		if ((newd = open(r1->path, r1->flags, 0666)) == -1) {
+			restore(r);
+			fprintf(stderr, "%s: %s: %s\n", progname, r1->path,
+				strerror(errno));
+			return EXIT_FAILURE;
 		}
-		if (fd != -1) {
-			for (int i = 0; argv[i] != NULL; i++)
-				argv[i] = argv[i + 1];
-			oldds[fd] = fcntl(fd, F_DUPFD_CLOEXEC, 0);
-			close(fd);
-			if (open(path, flags, 0666) == -1) {
-				restore(oldds);
-				fprintf(stderr, "%s: %s: %s\n", progname, path,
-					strerror(errno));
-				return EXIT_FAILURE;
-			}
-		} else
-			argv++;
+		if (newd != r1->fd) {
+			dup2(newd, r1->fd);
+			close(newd);
+		}
 	}
 	return EXIT_SUCCESS;
 }
 
 void
-restore(int oldds[])
+restore(struct redirect *r)
 {
-	for (int fd = 0; fd < 3; fd++)
-		if (oldds[fd] != -1) {
-			dup2(oldds[fd], fd);
-			close(oldds[fd]);
+	while (r != NULL) {
+		if (r->oldd == -1)
+			close(r->fd);
+		else {
+			dup2(r->oldd, r->fd);
+			close(r->oldd);
 		}
+		r = r->next;
+	}
 }
 
 /*
