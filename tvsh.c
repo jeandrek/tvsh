@@ -24,7 +24,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#define MAX_ARG_COUNT	64
 #define PROMPT		"$ "
 
 struct builtin {
@@ -39,11 +38,11 @@ struct redirect {
 };
 
 struct command {
-	char		*argv[MAX_ARG_COUNT + 1];
-	struct redirect	*redirections;
+	char		**argv;
+	struct redirect	*redirs;
 };
 
-int		 read_command(struct command *, FILE *);
+struct command	*read_command(FILE *);
 int		 read_token(char **, struct redirect **, FILE *f);
 void		 free_command(struct command *);
 int		 exec_command(struct command *);
@@ -66,7 +65,7 @@ struct builtin	 builtins[] = {
 int
 main(int argc, char *argv[])
 {
-	struct command command;
+	struct command *command;
 	FILE *f = stdin;
 	int result;
 
@@ -90,7 +89,7 @@ main(int argc, char *argv[])
 	while (1) {
 		if (interactive)
 			fputs(PROMPT, stdout);
-		if (read_command(&command, f) == EOF) {
+		if ((command = read_command(f)) == NULL) {
 			if (feof(f)) {
 				if (interactive)
 					putchar('\n');
@@ -101,51 +100,59 @@ main(int argc, char *argv[])
 			} else
 				return EXIT_FAILURE;
 		}
-		result = exec_command(&command);
-		free_command(&command);
+		result = exec_command(command);
+		free_command(command);
 	}
 }
 
+/* Token types */
 #define EOL		0
 #define TEXT		1
 #define REDIRECTION	2
 
-int
-read_command(struct command *command, FILE *f)
+struct command *
+read_command(FILE *f)
 {
-	struct redirect *r;
-	int type, i = 0;
+	struct command *command;
+	struct redirect *r, *r1;
+	int type, i = 0, k = 0;
 	char *text;
 
-	command->redirections = NULL;
+	command = malloc(sizeof *command);
+	command->argv = NULL;
+	command->redirs = NULL;
 	while ((type = read_token(&text, &r, f)) != EOL)
 		switch (type) {
 		case EOF:
-			return EOF;
+			return NULL;
 		case TEXT:
-			if (i == MAX_ARG_COUNT) {
-				fprintf(stderr, "%s: Too many arguments\n",
-					progname);
-				command->argv[i] = NULL;
-				return EOF;
-			}
+			if (i == k)
+				command->argv =
+					realloc(command->argv,
+						(k += 8)*sizeof (char *));
 			command->argv[i++] = text;
 			break;
 		case REDIRECTION:
-			if (read_token(&text, &r, f) != TEXT) {
+			if ((type = read_token(&text, &r1, f)) != TEXT) {
 				fprintf(stderr, "%s: Redirection operator not "
 					"followed by file path\n", progname);
-				free(r);
 				command->argv[i] = NULL;
-				return EOF;
+				if (type == REDIRECTION)
+					free(r1);
+				free(r);
+				free_command(command);
+				return NULL;
 			}
 			r->path = text;
-			r->next = command->redirections;
-			command->redirections = r;
+			r->next = command->redirs;
+			command->redirs = r;
 			break;
 		}
+	if (i == k)
+		command->argv = realloc(command->argv,
+					(k + 1)*sizeof (char *));
 	command->argv[i] = NULL;
-	return 0;
+	return command;
 }
 
 int
@@ -217,11 +224,13 @@ free_command(struct command *command)
 
 	for (int i = 0; command->argv[i] != NULL; i++)
 		free(command->argv[i]);
-	for (r = command->redirections; r != NULL; r = r1) {
+	free(command->argv);
+	for (r = command->redirs; r != NULL; r = r1) {
 		r1 = r->next;
 		free(r->path);
 		free(r);
 	}
+	free(command);
 }
 
 int
@@ -229,20 +238,20 @@ exec_command(struct command *command)
 {
 	int result;
 
-	result = redirect(command->redirections);
+	result = redirect(command->redirs);
 	if (result != EXIT_SUCCESS)
 		return result;
 
 	if (command->argv[0] == NULL) {
 		/* Empty command. */
-		restore(command->redirections);
+		restore(command->redirs);
 		return EXIT_SUCCESS;
 	}
 
 	for (size_t i = 0; i < NUM_BUILTINS; i++)
 		if (!strcmp(builtins[i].name, command->argv[0])) {
 			result = builtins[i].exec(command->argv);
-			restore(command->redirections);
+			restore(command->redirs);
 			return result;
 		}
 
@@ -255,7 +264,7 @@ exec_command(struct command *command)
 		exit(EXIT_FAILURE);
 	}
 	wait(&result);
-	restore(command->redirections);
+	restore(command->redirs);
 	return result;
 }
 
